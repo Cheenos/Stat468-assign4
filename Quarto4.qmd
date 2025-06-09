@@ -1,0 +1,336 @@
+---
+title: "STAT 468 Part 2: Assignments 1–3"
+author: "Eddy Ji"
+date: "`r Sys.Date()`"
+---
+# **A1 F1 Pit Stop Times**
+
+
+Data Peek
+```{r, include=FALSE}
+# Load libraries
+library(ggplot2)
+library(dplyr)
+
+# Read the data once
+pit_stops <- read.csv("pit_stops.csv", stringsAsFactors = FALSE)
+```
+```{r}
+# Peek at the data and get basic stats
+head(pit_stops)
+summary(pit_stops)
+```
+Scatterplot of Pit-Stop Times
+```{r}
+pit_stops %>%
+  mutate(seconds = milliseconds/1000) %>%
+  filter(seconds >= 3, seconds <= 180) %>%
+  ggplot(aes(x = lap, y = seconds)) +
+    geom_point(alpha = 0.6, color = "steelblue") +
+    labs(
+      x     = "Lap Number",
+      y     = "Duration (seconds)",
+      title = "Pit-Stop Durations by Lap"
+    ) +
+    theme_minimal()
+```
+
+Density By Lap
+```{r}
+pit_stops %>%
+  mutate(seconds = milliseconds/1000) %>%
+  filter(seconds >= 3, seconds <= 180) %>%
+  ggplot(aes(x = seconds)) +
+    geom_density(fill = "steelblue", alpha = 0.5) +
+    labs(
+      x = "Duration (s)",
+      y = "Density",
+      title = "Overall Pit-Stop Duration Distribution"
+    ) +
+    theme_minimal()
+
+```
+
+# **A2 Blackjack Odds**
+
+```{r, include=FALSE}
+# Load libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Read in the hand history data
+blkjck <- read.csv("blkjckhands.csv", stringsAsFactors = FALSE)
+```
+
+# Quick look at the first few hands and summary stats
+
+```{r}
+head(blkjck)
+summary(blkjck)
+```
+
+# Win-Rate Heatmap
+```{r}
+win_tbl <- blkjck %>%
+  mutate(
+    player_sum    = card1 + card2,
+    dealer_upcard = factor(dealcard1),
+    win_flag      = ifelse(winloss == "Win", 1, 0)
+  ) %>%
+  group_by(player_sum, dealer_upcard) %>%
+  summarize(win_rate = mean(win_flag), .groups = "drop")
+
+ggplot(win_tbl, aes(x = player_sum, y = dealer_upcard, fill = win_rate)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(
+    name   = "Win Probability",
+    low    = "white",
+    high   = "blue",
+    labels = scales::percent
+  ) +
+  scale_x_continuous(breaks = min(win_tbl$player_sum):max(win_tbl$player_sum)) +
+  labs(
+    x     = "Player’s initial two-card sum",
+    y     = "Dealer’s up-card",
+    title = "Win Probability by Starting Hand & Dealer Up-Card"
+  ) +
+  theme_minimal()
+```
+
+# Average Hits Heatmap
+```{r}
+hits_per_scenario <- blkjck %>%
+  mutate(
+    player_sum    = card1 + card2,
+    dealer_upcard = factor(dealcard1),
+    n_cards       = rowSums(across(card1:card5, ~ . != 0)),
+    hits          = pmax(0, n_cards - 2)
+  ) %>%
+  group_by(player_sum, dealer_upcard) %>%
+  summarize(avg_hits = mean(hits, na.rm = TRUE), .groups = "drop")
+
+ggplot(hits_per_scenario, aes(x = player_sum, y = dealer_upcard, fill = avg_hits)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(
+    name = "Avg # Hits",
+    low  = "white",
+    high = "red"
+  ) +
+  scale_x_continuous(breaks = min(hits_per_scenario$player_sum):
+                         max(hits_per_scenario$player_sum)) +
+  labs(
+    x     = "Player’s initial two-card sum",
+    y     = "Dealer’s up-card",
+    title = "Average Number of Hits by Starting Sum & Dealer Up-Card"
+  ) +
+  theme_minimal()
+```
+# Hits by Win vs Loss
+
+```{r}
+hit_tbl <- blkjck %>%
+  mutate(
+    player_sum    = card1 + card2,
+    dealer_upcard = factor(dealcard1),
+    n_cards       = rowSums(across(card1:card5, ~ . != 0)),
+    hits          = pmax(0, n_cards - 2),
+    result        = if_else(winloss == "Win", "Win", "Loss")
+  ) %>%
+  group_by(player_sum, dealer_upcard, result) %>%
+  summarize(avg_hits = mean(hits, na.rm = TRUE), .groups = "drop")
+
+ggplot(hit_tbl, aes(x = player_sum, y = dealer_upcard, fill = avg_hits)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(
+    name = "Avg # Hits",
+    low  = "white",
+    high = "firebrick"
+  ) +
+  scale_x_continuous(breaks = min(hit_tbl$player_sum):
+                         max(hit_tbl$player_sum)) +
+  facet_wrap(~ result, ncol = 2) +
+  labs(
+    x     = "Player’s initial two-card sum",
+    y     = "Dealer’s up-card",
+    title = "Average Number of Hits by Sum & Up-Card\nFaceted by Win vs. Loss"
+  ) +
+  theme_minimal()
+```
+# Delta Win-Rate (hit - stand) by starting sum and up card 
+```{r}
+delta_tbl3 <- blkjck %>%
+  mutate(
+    player_sum    = card1 + card2,
+    dealer_upcard = factor(dealcard1),
+    took_hit      = sumofcards > (card1 + card2),
+    win_flag      = as.integer(winloss == "Win")
+  ) %>%
+  group_by(player_sum, dealer_upcard, took_hit) %>%
+  summarize(n_decision = n(), win_rate = mean(win_flag), .groups = "drop") %>%
+  pivot_wider(
+    names_from   = took_hit,
+    names_prefix = "hit_",
+    values_from  = c(n_decision, win_rate)
+  ) %>%
+  mutate(
+    win_rate_hit_FALSE    = coalesce(win_rate_hit_FALSE, 0),
+    n_decision_hit_FALSE  = coalesce(n_decision_hit_FALSE, 0),
+    delta                 = win_rate_hit_TRUE - win_rate_hit_FALSE
+  )
+
+ggplot(delta_tbl3, aes(x = player_sum, y = dealer_upcard, fill = delta)) +
+  geom_tile(color = "white") +
+  annotate(
+    "rect",
+    xmin = 1, xmax = 12,
+    ymin = 1, ymax = 11,
+    color = "black",
+    fill  = NA,
+    size  = 1
+  ) +
+  annotate(
+    "text",
+    x     = 6, y = 11.5,
+    label   = "Ace duality biases values",
+    color   = "black",
+    size    = 4,
+    fontface= "bold"
+  ) +
+  scale_fill_gradient2(
+    name     = "Δ Win-Rate\n(hit − stand)",
+    low      = "#2166ac",
+    mid      = "white",
+    high     = "#b2182b",
+    midpoint = 0,
+    labels   = scales::percent_format(accuracy = 1)
+  ) +
+  scale_x_continuous(breaks = min(delta_tbl3$player_sum):
+                         max(delta_tbl3$player_sum)) +
+  labs(
+    x        = "Player’s initial two-card sum",
+    y        = "Dealer’s up-card",
+    title    = "Δ Win-Rate: Hit vs. Stand",
+    subtitle = "Assuming stand win-rate = 0% where never stood",
+    caption  = "Data: 900,000 hands from Kaggle"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title      = element_text(face = "bold"),
+    plot.title      = element_text(face = "bold", size = 14),
+    plot.subtitle   = element_text(size = 11),
+    plot.caption    = element_text(size = 8, hjust = 1)
+  )
+```
+
+# **A3 Poker Parsing**
+```{r, include=FALSE}
+library(tidyverse)
+library(stringr)
+library(lubridate)
+
+# Update this to where your .txt logs live
+folder_path <- "C:/Users/eddy2/OneDrive/Documents/Stat 468/Assign 3/Poker_game/"
+file_list   <- list.files(path = folder_path, pattern = "\\.txt$", full.names = TRUE)
+
+# Read and split into individual hands
+combined_text <- file_list %>%
+  map_chr(read_file) %>%
+  paste(collapse = "\n")
+
+hands <- str_split(combined_text, "(?=Game started at:)")[[1]] %>%
+  discard(~ .x == "")
+```
+# Peek at the Data
+
+```{r}
+length(hands)         # how many hands
+str_sub(hands[[1]], 1, 200)  # preview first 200 chars of hand 1
+```
+# Parse Data
+```{r}
+extract_id_time <- function(one_hand) {
+  gid <- str_match(one_hand, "Game ID:\\s*([0-9]+)")[,2]
+  dt  <- str_match(
+    one_hand,
+    "Game started at:\\s*(\\d{4}[/-]\\d{1,2}[/-]\\d{1,2} \\d{2}:\\d{2}:\\d{2})"
+  )[,2]
+  tibble(
+    game_id   = gid,
+    game_time = parse_date_time(dt, orders = c("Y/m/d H:M:S", "Y-m-d H:M:S"))
+  )
+}
+id_time_tbl <- map_dfr(hands, extract_id_time)
+id_time_tbl %>% slice_head(n = 5)
+parse_seats <- function(one_hand) {
+  raw <- str_extract_all(one_hand, "Seat \\d+: [^(]+\\(\\d+\\.?\\d*\\)")[[1]]
+  tibble(txt = raw) %>%
+    extract(txt,
+            into = c("seat","player","stack"),
+            regex = "Seat\\s+(\\d+):\\s+([^\\(]+)\\((\\d+\\.?\\d*)\\)",
+            convert = TRUE) %>%
+    mutate(
+      game_id = str_match(one_hand, "Game ID:\\s*([0-9]+)")[,2],
+      player  = str_trim(player)
+    ) %>%
+    select(game_id, seat, player, stack)
+}
+all_seats <- map_dfr(hands, parse_seats)
+all_seats %>% slice_head(n = 10)
+extract_flop_cards <- function(one_hand) {
+  gid  <- str_match(one_hand, "Game ID:\\s*([0-9]+)")[,2]
+  lines <- str_split(one_hand, "\\r?\\n")[[1]]
+  flop  <- lines[str_detect(lines, "^\\*\\*\\*\\s*FLOP")]
+  cards <- if (length(flop)) str_match(flop[1], "\\[(.*?)\\]")[,2] else NA
+  tibble(game_id = gid, flop_cards = cards)
+}
+flop_info <- map_dfr(hands, extract_flop_cards)
+flop_info %>% slice_head(n = 10)
+parse_preflop <- function(one_hand) {
+  gid    <- str_match(one_hand, "Game ID:\\s*([0-9]+)")[,2]
+  lines  <- str_split(one_hand, "\\r?\\n")[[1]]
+  flop_i <- which(str_detect(lines, "^\\*\\*\\*\\s*FLOP"))[1]
+  pat    <- "^\\s*Player\\s+([^\\s]+)\\s+(folds|checks|calls|raises|bets)(?:\\s*\\((\\d+\\.?\\d*)\\))?$"
+  idx    <- which(str_detect(lines, pat))
+  pre    <- if (!is.na(flop_i)) idx[idx < flop_i] else idx
+  if (!length(pre)) return(tibble())
+  tibble(line = pre, text = lines[pre]) %>%
+    extract(text,
+            into = c("player","action","amount"),
+            regex = pat) %>%
+    mutate(
+      game_id        = gid,
+      player         = str_trim(player),
+      preflop_action = action,
+      preflop_amount = as.numeric(amount)
+    ) %>%
+    group_by(game_id, player) %>%
+    slice_max(order_by = line, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    select(game_id, player, preflop_action, preflop_amount)
+}
+all_preflop <- map_dfr(hands, parse_preflop)
+all_preflop %>% slice_head(n = 10)
+players_full <- all_seats %>%
+  left_join(id_time_tbl,   by = "game_id") %>%
+  left_join(all_preflop,   by = c("game_id","player")) %>%
+  left_join(flop_info,     by = "game_id") %>%
+  arrange(game_id, seat)
+
+players_full %>% print(n = 10)
+```
+# Pivot to Wide Format
+
+```{r}
+players_wide <- players_full %>%
+  select(game_id, game_time, player, preflop_action) %>%
+  mutate(player = str_to_upper(player)) %>%
+  pivot_wider(
+    id_cols     = c(game_id, game_time),
+    names_from  = player,
+    values_from = preflop_action
+  )
+
+players_wide %>% print(n = 10)
+```
+---
